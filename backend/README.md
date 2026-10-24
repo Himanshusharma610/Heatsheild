@@ -286,6 +286,62 @@ All readings are persisted with an evaluated `quality_status`:
 
 ---
 
+## Heat-Risk Calculation Engine (Module 7)
+
+### `POST /api/v1/readings/calculate-heat-index`
+
+Evaluates the authoritative **National Weather Service (NWS) / NOAA Heat Index** deterministically from ambient temperature and humidity inputs, returning full explainability metadata.
+
+For detailed mathematical formulations, coefficient tables, and scientific limitations, see:
+👉 [Heat-Risk Calculation Method Specification](../docs/architecture/heat-risk-method.md)
+
+#### Example Request
+```bash
+curl -X POST "http://localhost:8000/api/v1/readings/calculate-heat-index" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "temperature_c": 38.5,
+    "relative_humidity_pct": 65.0,
+    "quality_status": "valid"
+  }'
+```
+
+#### Example Response (`200 OK`)
+```json
+{
+  "status": "valid",
+  "indicator_name": "heat_index",
+  "value_c": 56.4,
+  "value_f": 133.5,
+  "unit": "celsius",
+  "method": "NWS_ROTHFUSZ_1990",
+  "method_version": "1.0.0",
+  "equation_applied": "rothfusz_standard",
+  "input_temperature_c": 38.5,
+  "input_relative_humidity_pct": 65.0,
+  "informational_screening_level": "extreme_danger",
+  "limitations": [
+    "Heat Index is an environmental screening indicator, NOT Wet Bulb Globe Temperature (WBGT).",
+    "Assumes shade, light wind (approx. 5 knots / 2.5 m/s), standard atmospheric pressure, and typical light clothing.",
+    "Exposure to direct, intense sunlight can increase apparent heat stress by up to 8°C (15°F).",
+    "Does NOT account for personal metabolic workload, PPE encapsulation, hydration, age, acclimatization, or health conditions.",
+    "Does NOT provide clinical medical diagnosis, heatstroke prediction, or official occupational compliance certification."
+  ],
+  "notes": "Evaluated via standard full Rothfusz 9-term polynomial.",
+  "calculated_at": "2026-10-24T22:20:00Z"
+}
+```
+
+#### Operating Domain & Status Outcomes
+- **`valid`**: Input is within the supported domain (20°C to 55°C, 0% to 100% RH).
+- **`out_of_domain`**: Temperature is below 20°C (68°F) or above 55°C (131°F). Returns `value_c: null` and `screening_level: "unavailable"`.
+- **`missing_data`**: One or both inputs are missing (`null`). Never defaults to zero.
+- **`invalid_input`**: Non-finite float (NaN/Inf) or humidity outside [0, 100].
+- **`invalid_quality`**: Upstream reading carries an `invalid` quality classification.
+- **`suspect_quality`**: Evaluated normally, but flags `status: "suspect_quality"` with an audit note.
+
+---
+
 ## Health & Database Readiness Probes
 
 | Endpoint | Purpose | Semantics |

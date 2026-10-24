@@ -75,3 +75,40 @@ def ingest_reading(
         return ReadingDeduplicatedResponse(data=reading_data, deduplicated=True)
 
     return ReadingResponse(data=reading_data)
+
+
+from app.schemas.heat_risk import HeatIndexCalculationRequest, HeatIndexResult
+from app.services.heat_index import calculate_heat_index
+
+
+@router.post(
+    "/calculate-heat-index",
+    response_model=HeatIndexResult,
+    status_code=status.HTTP_200_OK,
+    summary="Calculate explainable Heat Index",
+    description=(
+        "Evaluates the National Weather Service (NWS) Heat Index deterministically for given "
+        "dry-bulb temperature and relative humidity inputs. Returns full explainability metadata, "
+        "including equation branch, calculation status, method version, and scientific limitations. "
+        "Does NOT persist data or claim medical diagnosis."
+    ),
+    responses={
+        status.HTTP_200_OK: {
+            "model": HeatIndexResult,
+            "description": "Calculated heat index result with explainability notes.",
+        },
+        getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422): {
+            "model": ErrorResponse,
+            "description": "Malformed input or non-finite numbers.",
+        },
+    },
+)
+def compute_heat_index_endpoint(
+    payload: HeatIndexCalculationRequest,
+) -> HeatIndexResult:
+    """Evaluate NWS Heat Index deterministically with explainability metadata."""
+    return calculate_heat_index(
+        temperature_c=payload.temperature_c,
+        relative_humidity_pct=payload.relative_humidity_pct,
+        quality_status=payload.quality_status,
+    )

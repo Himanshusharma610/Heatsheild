@@ -198,7 +198,7 @@ See [firmware/README.md](firmware/README.md).
 | **Module 4 — PostgreSQL Integration & Persistence** | ✅ Complete |
 | **Module 5 — ESP32 Firmware Scaffolding & Sensor HAL** | ✅ Complete *(Scaffolding & HAL; Hardware UNCONFIRMED)* |
 | **Module 6 — Telemetry Ingestion & Reliability** | ✅ Complete |
-| Module 7 — Heat-Risk Engine & Calculation | 🔲 Not started |
+| **Module 7 — Heat-Risk Engine & Calculation** | ✅ Complete |
 | Module 8 — Alerts & Notifications | 🔲 Not started |
 | Module 9 — Frontend Dashboard | 🔲 Not started |
 | Module 10 — Integration & End-to-End Testing | 🔲 Not started |
@@ -208,7 +208,7 @@ See [firmware/README.md](firmware/README.md).
 
 - Repository structure and documentation foundation.
 - Development conventions (`.editorconfig`, `.gitignore`).
-- Architecture and decision records (ADR-001 through ADR-024).
+- Architecture and decision records (ADR-001 through ADR-025).
 - Detailed system architecture and data-flow documentation.
 - Logical database design (8 entities, ER diagram, constraints, indexes).
 - API data contracts (9 endpoints, request/response schemas).
@@ -233,16 +233,17 @@ See [firmware/README.md](firmware/README.md).
 - Idempotent deduplication via database constraint `uq_readings_device_event` returning 200 OK (`deduplicated: true`) on identical retries.
 - Duplicate payload conflict detection returning 409 Conflict when event IDs are reused with differing measurements.
 - Telemetry quality classification engine (`valid`, `suspect`, `invalid`, `missing`) with timestamp drift reconciliation.
-- Comprehensive test suites: 54 backend tests (including real PostgreSQL 15 integration tests), 16 host C++ unit tests, and 5 contract parity tests.
+- Explainable Heat-Risk Calculation Engine (`app/services/heat_index.py`) implementing the authoritative NWS Rothfusz (1990) equation and Steadman (1979) physiological apparent temperature model.
+- Transparent calculation endpoint (`POST /api/v1/readings/calculate-heat-index`) with formula versioning, equation-branch tracking, domain safety limits (20°C to 55°C), and explicit scientific limitations (distinguishing Heat Index from WBGT).
+- Comprehensive test suites: 71 backend tests (including real PostgreSQL 15 integration tests), 16 host C++ unit tests, and 5 contract parity tests (92 total automated tests).
 
 ### Planned features (not yet implemented)
 
 - Physical hardware procurement and driver integration (Module 5 Phase 2).
-- Frontend React dashboard (Module 6).
-- Heat-index / WBGT / Humidex calculation engine (Module 7).
-- Sensor data ingestion and telemetry API (`POST /api/v1/readings`).
-- Alert notification delivery (SMS, email, webhooks).
-- User and device authentication implementation.
+- Alert rules and notification dispatch workflow (Module 8).
+- Frontend React dashboard (Module 9).
+- Integration and end-to-end testing (Module 10).
+- Deployment and production hardening (Module 11+).
 
 ---
 
@@ -251,6 +252,7 @@ See [firmware/README.md](firmware/README.md).
 - [Backend Documentation](backend/README.md)
 - [Firmware Documentation & Scaffolding](firmware/README.md)
 - [Hardware Selection & Physical Integration Guide](docs/hardware/hardware-selection.md)
+- [Heat-Risk Calculation Method & Explainability](docs/architecture/heat-risk-method.md)
 - [Architecture Overview](docs/architecture/overview.md)
 - [System Architecture](docs/architecture/system-architecture.md)
 - [Data Flow Specification](docs/architecture/data-flow.md)

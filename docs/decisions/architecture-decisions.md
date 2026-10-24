@@ -484,6 +484,32 @@
 
 ---
 
+## ADR-025: Selection of NWS Rothfusz (1990) Algorithm for Environmental Heat-Index Screening
+
+- **Status:** Accepted
+- **Date:** 2026-10-24
+- **Context:** The system requires an environmental heat-risk indicator derived from dry-bulb air temperature
+  and relative humidity measurements. In Module 2 (ADR-014), the selection of a specific heat-stress
+  formula was deferred until the risk engine module to prevent premature assumptions and unscientific claims.
+  The engine must be mathematically deterministic, cite an authoritative published source, strictly isolate
+  raw measurements from derived values, and make clear that it does not claim to measure WBGT or diagnose medical conditions.
+- **Decision:** Implement the United States National Weather Service (NWS) / NOAA Heat Index equation,
+  based on Steadman's (1979) physiological modeling and Rothfusz's (1990) 9-term polynomial regression with
+  low-humidity and high-humidity adjustments. The calculation engine is implemented as a pure, stateless service
+  (`app.services.heat_index.calculate_heat_index`) returning a structured result containing the numerical value,
+  calculation status (`valid`, `suspect_quality`, `missing_data`, `invalid_input`, `out_of_domain`), method version,
+  equation branch applied, and mandatory scientific limitations.
+- **Rationale:**
+  - NWS Rothfusz is the most widely cited and published formulation for apparent temperature using ambient temperature and humidity.
+  - Transparent mathematical formulation allows 100% deterministic unit testing and verification against published NOAA reference tables.
+  - Explicit operating domain enforcement ($20^\circ\text{C} \le T \le 55^\circ\text{C}$) prevents regression polynomial runaway.
+  - Leaves raw data in `sensor_readings` completely untouched, adhering to ADR-014.
+  - Clearly acknowledges that Heat Index assumes shaded conditions and light breeze, and does not represent WBGT or individual medical risk.
+- **Consequences:** Derived heat indices are computed on-demand or returned via dedicated response contracts.
+  Alert rules (Module 8) must be configured explicitly against indicator metrics rather than relying on assumed default thresholds.
+
+---
+
 ## Template for Future Decisions
 
 ```markdown
