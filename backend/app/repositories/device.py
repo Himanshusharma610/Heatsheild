@@ -8,24 +8,49 @@ from sqlalchemy.orm import Session
 from app.models.device import Device
 
 
+import hashlib
+from typing import Any
+
+
+def hash_device_token(raw_token: str) -> str:
+    """Compute deterministic SHA-256 hash of a raw device token for secure storage."""
+    return hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+
+
 def register_device(
     session: Session,
     device_code: str,
     worksite_id: uuid.UUID,
     display_name: str | None = None,
     firmware_version: str | None = None,
+    api_key_hash: str | None = None,
+    raw_token: str | None = None,
 ) -> Device:
     """Register a new device node assigned to a worksite."""
+    key_hash = api_key_hash
+    if raw_token and not key_hash:
+        key_hash = hash_device_token(raw_token)
+
     device = Device(
         device_code=device_code,
         worksite_id=worksite_id,
         display_name=display_name,
         firmware_version=firmware_version,
+        api_key_hash=key_hash,
         status="registered",
         is_active=True,
     )
     session.add(device)
     session.flush()
+    return device
+
+
+def set_device_token(session: Session, device_id: uuid.UUID, raw_token: str) -> Device | None:
+    """Assign or rotate the API key hash for a registered device."""
+    device = session.get(Device, device_id)
+    if device:
+        device.api_key_hash = hash_device_token(raw_token)
+        session.flush()
     return device
 
 

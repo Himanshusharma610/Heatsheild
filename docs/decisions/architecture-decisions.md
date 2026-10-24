@@ -433,6 +433,57 @@
 
 ---
 
+## ADR-023: Device Authentication via SHA-256 Pre-Shared Key Hashes
+
+- **Status:** Accepted
+- **Date:** 2026-10-24
+- **Context:** IoT devices transmitting environmental readings over HTTP must be authenticated
+  to prevent unauthorized data injection and resource exhaustion. However, lightweight microcontrollers
+  like ESP32 cannot easily manage complex mutual TLS certificates or OAuth2 client credentials.
+  Furthermore, credentials must never be stored in plain text, logged in web server logs, or disclosed
+  during verification failures.
+- **Decision:** Authenticate telemetry ingestion using per-device pre-shared tokens passed via
+  `X-Device-Token` or `Authorization: Bearer <token>`. The backend stores only deterministic
+  SHA-256 hashes (`api_key_hash`) in the `devices` table. Credential validation uses `secrets.compare_digest`
+  with dummy timing mitigation to guarantee constant-time execution. Failed authentications return a generic
+  HTTP 401 error envelope without disclosing whether the device code exists or is registered.
+- **Rationale:**
+  - Fast, computationally lightweight, and standard for embedded IoT nodes.
+  - Zero plain-text token exposure: database breaches only reveal one-way hashes.
+  - Constant-time comparison eliminates timing side-channel attacks.
+  - Generic 401 responses prevent device enumeration.
+  - Decouples device authentication completely from human user / supervisor session authentication.
+- **Consequences:** Device tokens must be securely generated and flashed onto devices during provisioning.
+  In deployed environments, HTTPS (TLS) is strictly required to protect tokens in transit.
+
+---
+
+## ADR-024: Idempotent Ingestion and Conflict Rejection Policy
+
+- **Status:** Accepted
+- **Date:** 2026-10-24
+- **Context:** IoT devices operating in intermittent cellular or Wi-Fi conditions must retry
+  failed transmissions. Network dropouts after the server processes a reading but before the ACK
+  reaches the device result in duplicate submissions. Conversely, buggy device firmware or replay
+  attacks could attempt to reuse an event ID with altered sensor measurements.
+- **Decision:** Enforce database-level uniqueness on `(device_id, event_id)` via `uq_readings_device_event`.
+  When an ingestion request is received:
+  1. If `(device_id, event_id)` does not exist, persist the reading and return `201 Created`.
+  2. If `(device_id, event_id)` exists with identical metrics, return `200 OK` with `deduplicated: true`.
+  3. If `(device_id, event_id)` exists with differing temperature, humidity, or timestamp metrics,
+     reject the submission with `409 Conflict`.
+  4. Concurrent duplicate requests that race are caught by `IntegrityError`, safely rolled back,
+     re-queried, and resolved identically.
+- **Rationale:**
+  - Guarantees true idempotency for honest retries without data corruption.
+  - Detects and rejects malicious or erroneous event ID collisions.
+  - Prevents race conditions from generating false 500 server errors on concurrent bursts.
+- **Consequences:** ESP32 firmware must treat `200 OK` as an acknowledgement of successful prior
+  ingestion and advance its event sequence counter, while treating `409 Conflict` as a fatal
+  configuration or state error.
+
+---
+
 ## Template for Future Decisions
 
 ```markdown

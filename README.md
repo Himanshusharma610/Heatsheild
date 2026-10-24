@@ -197,17 +197,18 @@ See [firmware/README.md](firmware/README.md).
 | **Module 3 — FastAPI Backend Foundation** | ✅ Complete |
 | **Module 4 — PostgreSQL Integration & Persistence** | ✅ Complete |
 | **Module 5 — ESP32 Firmware Scaffolding & Sensor HAL** | ✅ Complete *(Scaffolding & HAL; Hardware UNCONFIRMED)* |
-| Module 6 — Frontend Dashboard | 🔲 Not started |
+| **Module 6 — Telemetry Ingestion & Reliability** | ✅ Complete |
 | Module 7 — Heat-Risk Engine & Calculation | 🔲 Not started |
 | Module 8 — Alerts & Notifications | 🔲 Not started |
-| Module 9 — Integration & End-to-End Testing | 🔲 Not started |
-| Module 10+ — Deployment & Production Hardening | 🔲 Not started |
+| Module 9 — Frontend Dashboard | 🔲 Not started |
+| Module 10 — Integration & End-to-End Testing | 🔲 Not started |
+| Module 11+ — Deployment & Production Hardening | 🔲 Not started |
 
 ### Implemented features
 
 - Repository structure and documentation foundation.
 - Development conventions (`.editorconfig`, `.gitignore`).
-- Architecture and decision records (ADR-001 through ADR-022).
+- Architecture and decision records (ADR-001 through ADR-024).
 - Detailed system architecture and data-flow documentation.
 - Logical database design (8 entities, ER diagram, constraints, indexes).
 - API data contracts (9 endpoints, request/response schemas).
@@ -218,17 +219,21 @@ See [firmware/README.md](firmware/README.md).
 - Liveness (`/health`) and live readiness (`/ready`) endpoints adhering to contracts.
 - Centralized error handling without information disclosure.
 - SQLAlchemy 2.0 ORM models for all 8 entities (`worksites`, `devices`, `sensor_readings`, `alert_rules`, `alerts`, `alert_acknowledgements`, `users`, `audit_logs`).
-- Alembic database migration environment and verified initial migration (`0001_initial_schema.py`).
+- Alembic database migration environment (`0001_initial_schema.py` and `0002_add_device_api_key_hash.py`).
 - Persistence layer repositories for worksites, devices, sensor readings, and alert management.
 - Live database connectivity check integrated into `/ready` probe (reporting `connected`, `unavailable` [503], or `not_configured`).
-- Automated test suite (35 unit and real PostgreSQL 15 integration tests with pytest).
 - ESP32 Arduino firmware scaffolding with Hardware Abstraction Layer (`ISensor`, `UnconfiguredSensor`, `DiagnosticSimulatedSensor`).
 - Strongly typed environmental reading data contract (`reading_types.h`) matching backend API JSON schema with explicit presence flags (no silent zero substitution).
 - Numerical sanity and physical plausibility validation engine (`validation.h`) with NaN/Inf detection.
 - Autonomous, offline-capable local alert evaluation (`alert_logic.h`) with fail-safe unknown state (missing/corrupted data never evaluates to green safe).
 - Stateful thermal hysteresis deadband preventing rapid threshold bouncing.
 - Decoupled actuator (`IAlertOutput`) and telemetry boundary (`ITelemetryPublisher`) with zero hardcoded credentials.
-- Host-runnable C++ test suite (16 tests) and Python API contract test suite (5 tests).
+- Telemetry Ingestion API (`POST /api/v1/readings`) with Pydantic request validation and strict schema enforcement.
+- Per-device authentication via SHA-256 pre-shared key hashes with constant-time verification and generic 401 error envelopes.
+- Idempotent deduplication via database constraint `uq_readings_device_event` returning 200 OK (`deduplicated: true`) on identical retries.
+- Duplicate payload conflict detection returning 409 Conflict when event IDs are reused with differing measurements.
+- Telemetry quality classification engine (`valid`, `suspect`, `invalid`, `missing`) with timestamp drift reconciliation.
+- Comprehensive test suites: 54 backend tests (including real PostgreSQL 15 integration tests), 16 host C++ unit tests, and 5 contract parity tests.
 
 ### Planned features (not yet implemented)
 

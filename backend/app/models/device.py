@@ -30,6 +30,7 @@ class Device(Base):
     display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="registered", nullable=False, index=True)
     firmware_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    api_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

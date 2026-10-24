@@ -218,6 +218,74 @@ Interactive documentation:
 
 ---
 
+## Telemetry Ingestion API (Module 6)
+
+### `POST /api/v1/readings`
+
+Ingests environmental telemetry emitted by registered ESP32 sensor nodes.
+
+#### Authentication
+Requests must include a valid pre-shared device token in either the `X-Device-Token` header or `Authorization: Bearer <token>` header:
+```bash
+-H "X-Device-Token: your-device-secret-token"
+# OR
+-H "Authorization: Bearer your-device-secret-token"
+```
+The backend hashes the incoming token with SHA-256 and validates it against `devices.api_key_hash` using constant-time comparison. Unauthenticated or invalid requests return a generic `401 Unauthorized` response.
+
+#### Provisioning a Development Test Device
+To configure a test device for local development:
+```python
+from app.db.session import get_session_factory
+from app.repositories.device import register_device, hash_device_token
+
+session = get_session_factory()()
+device = register_device(
+    session=session,
+    device_code="HS-DEV-001",
+    worksite_id=your_worksite_id,
+    display_name="Dev Bench ESP32",
+    raw_token="dev-secret-token-12345",  # Automatically hashed and stored in api_key_hash
+)
+session.commit()
+```
+
+#### Example Ingestion Request
+```bash
+curl -X POST "http://localhost:8000/api/v1/readings" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: dev-secret-token-12345" \
+  -d '{
+    "device_code": "HS-DEV-001",
+    "event_id": "evt-00001",
+    "measured_at": "2026-10-24T22:15:00Z",
+    "temperature_c": 38.5,
+    "relative_humidity_pct": 65.0,
+    "firmware_version": "0.1.0",
+    "source_mode": "hardware"
+  }'
+```
+
+#### Responses & Status Codes
+
+| Status Code | Response Type | Description |
+| :--- | :--- | :--- |
+| **`201 Created`** | `ReadingResponse` | New reading successfully persisted. |
+| **`200 OK`** | `ReadingDeduplicatedResponse` | Idempotent duplicate: event ID was previously recorded with identical measurements (`"deduplicated": true`). Safe for device to advance sequence counter. |
+| **`401 Unauthorized`** | `ErrorResponse` | Missing token, invalid token, inactive device, or unregistered device code. |
+| **`409 Conflict`** | `ErrorResponse` | Event ID collision: the event was already recorded with conflicting measurement data. |
+| **`422 Validation Error`** | `ErrorResponse` | Missing required fields (`device_code`, `event_id`), humidity > 100 or < 0, or non-finite numbers (NaN/Inf). |
+| **`503 Service Unavailable`** | `ErrorResponse` | Database persistence failure. Reading was rolled back. |
+
+#### Data Quality Classification Policy
+All readings are persisted with an evaluated `quality_status`:
+- **`valid`**: Measurements present, physically plausible, and timestamp within acceptable drift window.
+- **`suspect`**: Extreme ambient thermal range (-20°C to -40°C or 70°C to 85°C), future clock drift > 10 minutes, or uncalibrated historical RTC timestamp (< 2020).
+- **`invalid`**: Non-finite float, extreme physical impossibility (< -40°C or > 85°C), or future timestamp drift > 24 hours.
+- **`missing`**: Both temperature and humidity are absent (null).
+
+---
+
 ## Health & Database Readiness Probes
 
 | Endpoint | Purpose | Semantics |

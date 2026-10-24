@@ -32,10 +32,13 @@ async def api_v1_index() -> dict[str, str]:
     }
 
 
+from app.api.v1.readings import router as readings_router
+
+# Mount readings router (Module 6)
+router.include_router(readings_router, prefix="/readings", tags=["Readings"])
+
 # Future module routers will be registered here:
 # from app.api.v1.devices import router as devices_router
-# from app.api.v1.readings import router as readings_router
 # from app.api.v1.alerts import router as alerts_router
 # router.include_router(devices_router, prefix="/devices", tags=["Devices"])
-# router.include_router(readings_router, prefix="/readings", tags=["Readings"])
 # router.include_router(alerts_router, prefix="/alerts", tags=["Alerts"])

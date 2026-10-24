@@ -238,3 +238,68 @@ def test_postgres_timezone_aware_queries(pg_session: Session) -> None:
     # Query history
     history = get_reading_history(pg_session, device.id)
     assert len(history) == 3
+
+
+@postgres_required
+def test_postgres_device_api_key_hash_storage(pg_session: Session) -> None:
+    """Verify that api_key_hash column (Module 6) is persisted and queryable in PostgreSQL."""
+    from app.repositories.device import hash_device_token, set_device_token
+
+    worksite = create_worksite(pg_session, name=f"Auth Site {uuid.uuid4().hex[:6]}")
+    raw_token = "pg-secret-token-12345"
+    expected_hash = hash_device_token(raw_token)
+
+    device = register_device(
+        pg_session,
+        device_code=f"HS-AUTH-{uuid.uuid4().hex[:6]}",
+        worksite_id=worksite.id,
+        raw_token=raw_token,
+    )
+    pg_session.commit()
+
+    retrieved = pg_session.get(Device, device.id)
+    assert retrieved is not None
+    assert retrieved.api_key_hash == expected_hash
+
+    # Test key rotation
+    new_token = "pg-rotated-token-67890"
+    set_device_token(pg_session, device.id, new_token)
+    pg_session.commit()
+
+    pg_session.refresh(retrieved)
+    assert retrieved.api_key_hash == hash_device_token(new_token)
+
+
+@postgres_required
+def test_postgres_telemetry_service_idempotent_ingestion(pg_session: Session) -> None:
+    """Verify service-layer ingestion and idempotent retry on PostgreSQL."""
+    from app.schemas.reading import ReadingCreateRequest
+    from app.services.telemetry import ingest_telemetry_reading
+
+    worksite = create_worksite(pg_session, name=f"Service Site {uuid.uuid4().hex[:6]}")
+    device = register_device(
+        pg_session,
+        device_code=f"HS-SVC-{uuid.uuid4().hex[:6]}",
+        worksite_id=worksite.id,
+        raw_token="svc-token",
+    )
+    pg_session.commit()
+
+    payload = ReadingCreateRequest(
+        device_code=device.device_code,
+        event_id="evt-pg-001",
+        temperature_c=36.5,
+        relative_humidity_pct=60.0,
+        firmware_version="0.1.0",
+    )
+
+    # Ingest new reading
+    reading1, dedup1 = ingest_telemetry_reading(pg_session, device, payload)
+    assert dedup1 is False
+    assert reading1.id is not None
+    assert reading1.quality_status == "valid"
+
+    # Retransmit identical event
+    reading2, dedup2 = ingest_telemetry_reading(pg_session, device, payload)
+    assert dedup2 is True
+    assert reading2.id == reading1.id

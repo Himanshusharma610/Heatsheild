@@ -1,7 +1,12 @@
 """Pydantic schemas for HeatShield Bharat."""
 
 from app.schemas.common import ErrorBody, ErrorDetail, ErrorResponse
-from app.schemas.health import HealthResponse, ReadyResponse
+from app.schemas.reading import (
+    ReadingCreateRequest,
+    ReadingData,
+    ReadingDeduplicatedResponse,
+    ReadingResponse,
+)
 
 __all__ = [
     "ErrorBody",
@@ -9,4 +14,8 @@ __all__ = [
     "ErrorResponse",
     "HealthResponse",
     "ReadyResponse",
+    "ReadingCreateRequest",
+    "ReadingData",
+    "ReadingDeduplicatedResponse",
+    "ReadingResponse",
 ]
