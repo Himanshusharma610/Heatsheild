@@ -61,9 +61,16 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for details.
 
 ```
 heatshield-bharat/
-├── firmware/          # ESP32 firmware (pending hardware confirmation)
+├── firmware/          # ESP32 firmware scaffolding (HAL, validation, alert logic)
 │   ├── README.md
-│   └── tests/
+│   ├── heatshield/    # Arduino sketch & hardware-independent headers
+│   │   ├── heatshield.ino
+│   │   ├── reading_types.h
+│   │   ├── sensor_interface.h
+│   │   ├── validation.h
+│   │   ├── alert_logic.h
+│   │   └── telemetry_boundary.h
+│   └── tests/         # Host-runnable C++ and contract test suites
 ├── backend/           # FastAPI application
 │   ├── app/
 │   ├── tests/
@@ -189,7 +196,7 @@ See [firmware/README.md](firmware/README.md).
 | **Module 2 — Architecture & Data Contracts** | ✅ Complete |
 | **Module 3 — FastAPI Backend Foundation** | ✅ Complete |
 | **Module 4 — PostgreSQL Integration & Persistence** | ✅ Complete |
-| Module 5 — ESP32 Firmware & Sensor Integration | 🔲 Not started (hardware unconfirmed) |
+| **Module 5 — ESP32 Firmware Scaffolding & Sensor HAL** | ✅ Complete *(Scaffolding & HAL; Hardware UNCONFIRMED)* |
 | Module 6 — Frontend Dashboard | 🔲 Not started |
 | Module 7 — Heat-Risk Engine & Calculation | 🔲 Not started |
 | Module 8 — Alerts & Notifications | 🔲 Not started |
@@ -200,7 +207,7 @@ See [firmware/README.md](firmware/README.md).
 
 - Repository structure and documentation foundation.
 - Development conventions (`.editorconfig`, `.gitignore`).
-- Architecture and decision records.
+- Architecture and decision records (ADR-001 through ADR-022).
 - Detailed system architecture and data-flow documentation.
 - Logical database design (8 entities, ER diagram, constraints, indexes).
 - API data contracts (9 endpoints, request/response schemas).
@@ -215,10 +222,17 @@ See [firmware/README.md](firmware/README.md).
 - Persistence layer repositories for worksites, devices, sensor readings, and alert management.
 - Live database connectivity check integrated into `/ready` probe (reporting `connected`, `unavailable` [503], or `not_configured`).
 - Automated test suite (35 unit and real PostgreSQL 15 integration tests with pytest).
+- ESP32 Arduino firmware scaffolding with Hardware Abstraction Layer (`ISensor`, `UnconfiguredSensor`, `DiagnosticSimulatedSensor`).
+- Strongly typed environmental reading data contract (`reading_types.h`) matching backend API JSON schema with explicit presence flags (no silent zero substitution).
+- Numerical sanity and physical plausibility validation engine (`validation.h`) with NaN/Inf detection.
+- Autonomous, offline-capable local alert evaluation (`alert_logic.h`) with fail-safe unknown state (missing/corrupted data never evaluates to green safe).
+- Stateful thermal hysteresis deadband preventing rapid threshold bouncing.
+- Decoupled actuator (`IAlertOutput`) and telemetry boundary (`ITelemetryPublisher`) with zero hardcoded credentials.
+- Host-runnable C++ test suite (16 tests) and Python API contract test suite (5 tests).
 
 ### Planned features (not yet implemented)
 
-- ESP32 firmware and physical sensor integration (Module 5).
+- Physical hardware procurement and driver integration (Module 5 Phase 2).
 - Frontend React dashboard (Module 6).
 - Heat-index / WBGT / Humidex calculation engine (Module 7).
 - Sensor data ingestion and telemetry API (`POST /api/v1/readings`).
@@ -230,6 +244,8 @@ See [firmware/README.md](firmware/README.md).
 ## Documentation
 
 - [Backend Documentation](backend/README.md)
+- [Firmware Documentation & Scaffolding](firmware/README.md)
+- [Hardware Selection & Physical Integration Guide](docs/hardware/hardware-selection.md)
 - [Architecture Overview](docs/architecture/overview.md)
 - [System Architecture](docs/architecture/system-architecture.md)
 - [Data Flow Specification](docs/architecture/data-flow.md)
@@ -237,7 +253,6 @@ See [firmware/README.md](firmware/README.md).
 - [API Contracts](docs/architecture/api-contracts.md)
 - [Architecture Decisions](docs/decisions/architecture-decisions.md)
 - [Sensor Reading JSON Schema](docs/contracts/sensor-reading.schema.json)
-- [Firmware Plans](firmware/README.md)
 - [Database Schema Notes](database/schema-notes.md)
 
 ---

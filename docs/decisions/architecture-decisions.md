@@ -391,6 +391,48 @@
 
 ---
 
+## ADR-021: Sensor Hardware Abstraction Layer (HAL) and Safe Unconfigured Defaults
+
+- **Status:** Accepted
+- **Date:** 2026-10-24
+- **Context:** Hardware selection for ESP32 and environmental sensors is deliberately unconfirmed in Module 5.
+  Prematurely committing to specific GPIO pinouts, I2C addresses, or proprietary sensor libraries risks
+  introducing hardware conflicts and architectural coupling.
+- **Decision:** Encapsulate physical sensor interactions behind an abstract C++ interface (`ISensor`).
+  Provide a default `UnconfiguredSensor` adapter that fails safely, explicitly reporting `SENSOR_STATUS_UNCONFIGURED`
+  and populating readings with `QUALITY_MISSING`. Prohibit simulated readings from masquerading as hardware data
+  by enforcing a typed `ReadingSourceMode` enum (`SOURCE_MODE_HARDWARE` vs `SOURCE_MODE_SIMULATED`).
+- **Rationale:**
+  - Decouples firmware validation, alerting, and telemetry boundaries from physical hardware.
+  - Enables full test coverage of firmware business logic on host machines without hardware emulators.
+  - Eliminates the risk of false-positive testing where mock data is mistaken for actual sensor communication.
+- **Consequences:** Concrete sensor drivers (e.g. SHT31, BME280) must implement `ISensor` once hardware
+  is procured, without modifying validation, alerting, or serialization logic.
+
+---
+
+## ADR-022: Fail-Safe Local Alert Evaluation and Offline Unknown State
+
+- **Status:** Accepted
+- **Date:** 2026-10-24
+- **Context:** Outdoor worker heat monitoring is a life-safety critical application. If a physical sensor
+  fails, disconnects, reports non-finite numbers (NaN/Inf), or produces out-of-bounds readings, the local
+  alert indicator must never misinform workers that conditions are safe (green). Furthermore, local alerts
+  must evaluate deterministically without cloud or internet connectivity.
+- **Decision:** Implement autonomous, on-device alert evaluation with an explicit `ALERT_LEVEL_UNKNOWN` fallback.
+  Any missing measurement, bus error, non-finite float, or failed validation unconditionally transitions the
+  alert state to `ALERT_LEVEL_UNKNOWN`. A stateful hysteresis deadband prevents rapid state fluttering on
+  thermal boundaries. Provisional threshold values (35.0 °C caution, 40.0 °C danger) are strictly documented
+  as scaffolding placeholders without claiming clinical or diagnostic validity.
+- **Rationale:**
+  - Fail-safe design ensures faulty hardware or unconfigured states can never be mistaken for safe conditions.
+  - Zero network dependency ensures worker safety alerts operate reliably even in remote worksites with zero connectivity.
+  - Clear separation between engineering placeholders and formal medical/occupational risk models protects project integrity.
+- **Consequences:** Physical alert actuators (buzzers/LEDs) must indicate the `UNKNOWN` state distinctly
+  (e.g., continuous amber pulse or diagnostic sequence) rather than turning off or displaying green.
+
+---
+
 ## Template for Future Decisions
 
 ```markdown

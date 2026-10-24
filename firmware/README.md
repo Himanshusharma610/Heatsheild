@@ -1,95 +1,103 @@
-# HeatShield Bharat — Firmware
+# HeatShield Bharat — ESP32 Firmware
 
-## Purpose
+## 1. Overview & Current Status
 
-The firmware runs on an ESP32 microcontroller and is responsible for:
+This directory contains the firmware for the **HeatShield Bharat** environmental heat-monitoring device.
 
-1. Reading environmental sensors (temperature, humidity, and related parameters).
-2. Calculating local heat-index or heat-risk values on-device.
-3. Triggering local alerts (buzzer, LED) when thresholds are exceeded.
-4. Transmitting telemetry data to the backend API via Wi-Fi (HTTPS/JSON).
-5. Buffering readings locally when the network is unavailable and uploading
-   them when connectivity is restored.
-6. Managing deep-sleep and power-saving modes for field deployment.
+- **Current Implementation Phase:** **Module 5: Scaffolding and Sensor Abstraction**
+- **Hardware Status:** `UNCONFIRMED`
+  - No physical ESP32 board or sensor modules have been procured or wired yet.
+  - All hardware-specific parameters (GPIO pins, I2C addresses, bus timings, sensor libraries) are marked `UNCONFIRMED`.
+  - The firmware is built with an isolated **Hardware Abstraction Layer (HAL)** that runs safely on host machines and on unconfigured hardware without fabricating readings.
+- **Fail-Safe Guarantee:** Missing, corrupted, or unconfigured sensor states evaluate strictly to `ALERT_LEVEL_UNKNOWN` and will never trigger a false "safe" (green) indicator.
 
----
-
-## ⚠ Hardware Confirmation Status
-
-> **The hardware inventory is UNCONFIRMED.**
->
-> No ESP32 board, sensor modules, or supporting components have been purchased
-> or verified yet. No board-specific firmware or sensor drivers have been
-> implemented.
-
-The following information **must be confirmed** before firmware development
-can begin:
-
-### 1. ESP32 Board
-
-- **Model:** *(e.g., ESP32-DevKitC V4, ESP32-S3, ESP32-C3, NodeMCU-32S)*
-- **Flash size:** *(e.g., 4 MB, 8 MB, 16 MB)*
-- **USB interface:** *(e.g., CP2102, CH340, native USB)*
-- **Available GPIO pins:** *(mapped to sensor and alert connections)*
-
-### 2. Environmental Sensors
-
-- **Temperature/Humidity sensor model:** *(e.g., DHT22, BME280, SHT31, AHT20)*
-- **Interface:** *(e.g., I²C, SPI, single-wire digital, analog)*
-- **Accuracy and range:** *(check datasheet)*
-- **Additional sensors:** *(UV index, barometric pressure, wind, etc.)*
-
-### 3. Electrical Requirements
-
-- **Operating voltage:** *(3.3 V logic? 5 V supply?)*
-- **Power supply:** *(USB, battery, solar?)*
-- **Pull-up resistors needed?**
-- **Level shifters required?**
-
-### 4. Alert Output
-
-- **Buzzer type:** *(active or passive?)*
-- **LED indicators:** *(count, colour, GPIO assignments)*
-
-### 5. Development Toolchain
-
-- **Framework:** Arduino for ESP32 *(planned, subject to change)*
-- **IDE / Build tool:** Arduino IDE, PlatformIO, or ESP-IDF
-- **Upload method:** USB serial
-- **Libraries:** Sensor driver library, WiFi, HTTPClient, ArduinoJson
-
-### 6. Offline Storage
-
-- **Approach:** *(SPIFFS, LittleFS, SD card — depends on board flash size)*
-- **Buffer capacity target:** *(hours of readings to retain offline)*
+For the comprehensive hardware evaluation and physical integration checklist, refer to:
+👉 [Hardware Selection and Integration Guide](../docs/hardware/hardware-selection.md)
 
 ---
 
-## Directory Structure (Planned)
+## 2. Firmware Directory Structure
 
 ```
 firmware/
-├── README.md           ← you are here
-├── src/                # Main firmware source (created after hardware confirmation)
-├── include/            # Header files
-├── lib/                # Project-specific libraries
-├── test/               # Firmware unit tests
-├── platformio.ini      # PlatformIO config (if chosen)
-└── secrets.h.example   # Template for Wi-Fi / API credentials
+├── README.md                      # This document
+├── heatshield/                    # Arduino sketch directory (matches .ino name)
+│   ├── heatshield.ino             # Main Arduino sketch entry point (setup / loop)
+│   ├── reading_types.h            # Typed environmental reading contract (matches API schema)
+│   ├── sensor_interface.h         # Abstract sensor HAL (ISensor, UnconfiguredSensor, DiagnosticSimulatedSensor)
+│   ├── validation.h               # Numerical sanity (NaN/Inf) and physical plausibility bounds engine
+│   ├── alert_logic.h              # Autonomous, offline local alert evaluation & hysteresis
+│   └── telemetry_boundary.h       # Decoupled telemetry publisher interface (zero hardcoded secrets)
+└── tests/                         # Host-runnable test suites
+    ├── test_firmware.cpp          # C++ unit tests (validation, alert logic, mock sensors, hysteresis)
+    ├── test_firmware_contract.py  # Python parity test against docs/contracts/sensor-reading.schema.json
+    └── run_tests.sh               # Test runner (native g++ or rootless Podman/Docker container)
 ```
-
-> Directories and source files will be created once the hardware is confirmed
-> and the toolchain is set up.
 
 ---
 
-## Getting Started (Future)
+## 3. Core Architecture & Modules
 
-1. Confirm and document the hardware (see checklist above).
-2. Install the chosen development toolchain (PlatformIO recommended).
-3. Copy `secrets.h.example` to `secrets.h` and add your Wi-Fi credentials
-   and backend API key. **Never commit `secrets.h`.**
-4. Connect the ESP32 via USB.
-5. Build and upload the firmware.
+### 3.1 Reading Data Contract (`reading_types.h`)
+- Implements `EnvironmentalReading` conforming strictly to `docs/contracts/sensor-reading.schema.json`.
+- Features explicit presence flags (`has_temperature`, `has_humidity`) to ensure missing readings are **never** silently substituted with `0.0`.
+- Includes an explicit `ReadingSourceMode` enum (`SOURCE_MODE_HARDWARE` vs `SOURCE_MODE_SIMULATED`) ensuring test fixtures can never masquerade as physical measurements.
+- Tracks `SensorStatus` (`UNCONFIGURED`, `INITIALIZING`, `OK`, `ERROR`, `DISCONNECTED`) and `ReadingQuality` (`VALID`, `SUSPECT`, `INVALID`, `MISSING`).
 
-Detailed instructions will be added after the hardware is confirmed.
+### 3.2 Sensor Abstraction Layer (`sensor_interface.h`)
+- Isolates physical bus protocols (I2C, OneWire, SPI) behind the `ISensor` base class.
+- Includes `UnconfiguredSensor`: Safe default adapter that returns `false` on `begin()` and reports `SENSOR_STATUS_UNCONFIGURED`.
+- Includes `DiagnosticSimulatedSensor`: Explicitly sets `SOURCE_MODE_SIMULATED` for diagnostic host tests.
+
+### 3.3 Reading Validation Engine (`validation.h`)
+- Hardware-independent plausibility validation.
+- Validates against `PlausibilityBounds` (defaults: -20.0 °C to +70.0 °C, 0% to 100% RH).
+- Detects non-finite floating-point states (`isnan()`, `isinf()`).
+- Flags missing metrics and sensor hardware faults without silently clamping corrupted values.
+- *Note:* Physical plausibility verification confirms data sanity; it does NOT assert sensor calibration accuracy.
+
+### 3.4 Local Alert Evaluation (`alert_logic.h`)
+- Evaluates environmental telemetry **completely offline**, ensuring worker protection without cellular, Wi-Fi, or cloud dependency.
+- **Fail-safe Rule:** Any corrupted, missing, or unconfigured data evaluates to `ALERT_LEVEL_UNKNOWN`. It **never** evaluates to `ALERT_LEVEL_SAFE`.
+- Employs stateful hysteresis (deadband) to prevent rapid threshold fluttering on temperature boundaries.
+- Decouples alert actuators (piezo buzzers, RGB LEDs) behind `IAlertOutput` and `NullAlertOutput` to prevent blind writes to unconfirmed GPIO pins.
+- *Disclaimer:* Scaffolding thresholds (35.0 °C caution, 40.0 °C danger) are provisional engineering placeholders and do not claim clinical heatstroke diagnosis or validated medical advisory status.
+
+### 3.5 Telemetry Boundary (`telemetry_boundary.h`)
+- Abstract interface `ITelemetryPublisher` isolates future Wi-Fi / MQTT / HTTP transmission.
+- `UnconfiguredTelemetryPublisher` safely drops outgoing packets without blocking the local alert loop.
+- Contains zero embedded credentials, Wi-Fi SSIDs, or API tokens.
+
+---
+
+## 4. Running Unit Tests
+
+### 4.1 Host C++ Unit Tests
+Host tests verify reading types, validation algorithms, alert thresholds, and hysteresis.
+
+Using the automated runner:
+```bash
+./firmware/tests/run_tests.sh
+```
+
+Or manually using Podman/Docker:
+```bash
+podman run --rm -v "$(pwd)/firmware:/workspace:Z" -w /workspace docker.io/library/alpine:latest \
+    sh -c "apk add --no-cache g++ && g++ -std=c++17 -Wall -Wextra tests/test_firmware.cpp -o tests/test_runner && ./tests/test_runner"
+```
+
+### 4.2 Python Schema Parity Tests
+Verifies C++ struct definitions against the backend API JSON schema:
+```bash
+backend/.venv/bin/pytest firmware/tests/test_firmware_contract.py -v
+```
+
+---
+
+## 5. Next Steps for Physical Hardware Integration
+
+When the physical ESP32 board and sensor are selected:
+1. Complete the checklist in [docs/hardware/hardware-selection.md](../docs/hardware/hardware-selection.md).
+2. Create concrete driver classes implementing `ISensor` and `IAlertOutput`.
+3. Configure board target and pins in Arduino IDE or PlatformIO.
+4. Flash and test with physical hardware in an isolated bench environment.
