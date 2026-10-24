@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heatshield-bharat.local/schemas/sensor-reading-request.v1.json",
+  "title": "Sensor Reading Request",
+  "description": "JSON Schema for the POST /api/v1/readings request body. This is a documentation-only contract; runtime validation will be performed by Pydantic in the FastAPI backend.",
+  "type": "object",
+  "required": ["device_code", "event_id"],
+  "properties": {
+    "device_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Stable, non-secret device identifier. Must match a registered, active device.",
+      "examples": ["HS-WS01-D001"]
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Device-assigned, monotonically increasing event identifier. Unique per device. Used for deduplication and idempotent retries.",
+      "examples": ["evt-00042"]
+    },
+    "measured_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "UTC timestamp from the device clock at the time of measurement. Nullable if the device clock is unreliable. ISO 8601 format.",
+      "examples": ["2026-11-15T10:30:00Z"]
+    },
+    "temperature_c": {
+      "type": ["number", "null"],
+      "description": "Temperature in degrees Celsius. Nullable if the sensor did not produce a reading.",
+      "examples": [38.5]
+    },
+    "relative_humidity_pct": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Relative humidity in percent (0–100). Nullable if the sensor did not produce a reading.",
+      "examples": [72.3]
+    },
+    "firmware_version": {
+      "type": ["string", "null"],
+      "maxLength": 50,
+      "description": "Firmware version string reported by the device.",
+      "examples": ["0.1.0"]
+    }
+  },
+  "additionalProperties": false
+}

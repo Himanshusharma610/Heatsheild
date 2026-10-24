@@ -1,0 +1,26 @@
+# ===========================================================================
+# HeatShield Bharat — Backend Python Dependencies
+# ===========================================================================
+# Module 3: Foundational FastAPI Application Dependencies
+# ===========================================================================
+
+# Core API framework and ASGI server
+fastapi>=0.110.0,<1.0.0
+uvicorn[standard]>=0.28.0,<1.0.0
+
+# Settings and schema validation
+pydantic>=2.9.0,<3.0.0
+pydantic-settings>=2.2.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# Testing and test client
+pytest>=8.0.0,<10.0.0
+httpx>=0.27.0,<1.0.0
+
+# ===========================================================================
+# Module 4: PostgreSQL Persistence & Database Migrations
+# ===========================================================================
+
+sqlalchemy>=2.0.0,<3.0.0
+alembic>=1.13.0,<2.0.0
+psycopg2-binary>=2.9.0,<3.0.0

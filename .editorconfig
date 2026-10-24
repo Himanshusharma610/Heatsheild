@@ -1,0 +1,61 @@
+# HeatShield Bharat — EditorConfig
+# https://editorconfig.org
+
+root = true
+
+# Default settings for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Python
+[*.py]
+indent_size = 4
+
+# TypeScript, JavaScript, JSX, TSX
+[*.{ts,tsx,js,jsx}]
+indent_size = 2
+
+# JSON
+[*.json]
+indent_size = 2
+
+# YAML
+[*.{yml,yaml}]
+indent_size = 2
+
+# HTML, CSS
+[*.{html,css,scss}]
+indent_size = 2
+
+# Markdown — preserve trailing whitespace for line breaks
+[*.md]
+trim_trailing_whitespace = false
+
+# SQL
+[*.sql]
+indent_size = 4
+
+# Firmware C/C++ (Arduino / ESP-IDF)
+[*.{c,h,cpp,hpp,ino}]
+indent_size = 4
+
+# Makefiles require tabs
+[Makefile]
+indent_style = tab
+
+# Shell scripts
+[*.sh]
+indent_size = 4
+
+# Configuration files
+[*.{toml,ini,cfg}]
+indent_size = 4
+
+# .env files
+[.env*]
+insert_final_newline = true
