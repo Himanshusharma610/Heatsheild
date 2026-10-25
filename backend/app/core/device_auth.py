@@ -26,15 +26,35 @@ DUMMY_HASH = hashlib.sha256(b"heatshield-bharat-dummy-timing-mitigation").hexdig
 
 def extract_device_token(
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     authorization: str | None = Header(default=None),
 ) -> str:
-    """Extract device token from X-Device-Token header or Authorization: Bearer scheme."""
+    """Extract device token from X-Device-Token header or Authorization: Bearer scheme.
+
+    Strict separation: Rejects human user credentials (X-User-Id or user JWT).
+    """
+    if x_user_id and x_user_id.strip():
+        logger.warning("Rejected attempt to use human user credentials on device endpoint")
+        raise UnauthorizedException("Human user credentials cannot be used for device telemetry ingestion.")
+
     if x_device_token and x_device_token.strip():
         return x_device_token.strip()
 
     if authorization and authorization.strip().lower().startswith("bearer "):
         token = authorization.strip()[7:].strip()
         if token:
+            # Check if this token is a human JWT
+            if token.count(".") == 2:
+                try:
+                    from app.core.security import decode_access_token
+                    payload = decode_access_token(token)
+                    if payload.get("type") == "access":
+                        logger.warning("Rejected human JWT presented on device telemetry endpoint")
+                        raise UnauthorizedException("Human user credentials cannot be used for device telemetry ingestion.")
+                except UnauthorizedException:
+                    raise
+                except Exception:
+                    pass
             return token
 
     raise UnauthorizedException("Device authentication required")

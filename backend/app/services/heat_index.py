@@ -14,7 +14,9 @@ CRITICAL SCIENTIFIC & SAFETY CONSTRAINTS:
    decision-support aids and do not constitute an official Indian occupational regulation.
 """
 
+from collections.abc import Callable
 from datetime import datetime, timezone
+from decimal import Decimal
 import math
 
 from app.schemas.heat_risk import (
@@ -29,6 +31,10 @@ METHOD_VERSION = "1.0.0"
 # Operating domain limits in Celsius (corresponds to ~68°F to 131°F)
 DOMAIN_MIN_TEMP_C = 20.0
 DOMAIN_MAX_TEMP_C = 55.0
+
+# Physical atmospheric plausibility boundaries in Celsius
+TEMP_PLAUSIBILITY_MIN_C = -50.0
+TEMP_PLAUSIBILITY_MAX_C = 100.0
 
 # Rothfusz 9-term polynomial regression coefficients
 C1 = -42.379
@@ -52,12 +58,12 @@ STANDARD_LIMITATIONS = [
 
 def c_to_f(celsius: float) -> float:
     """Convert degrees Celsius to degrees Fahrenheit."""
-    return (celsius * 9.0 / 5.0) + 32.0
+    return (float(celsius) * 9.0 / 5.0) + 32.0
 
 
 def f_to_c(fahrenheit: float) -> float:
     """Convert degrees Fahrenheit to degrees Celsius."""
-    return (fahrenheit - 32.0) * 5.0 / 9.0
+    return (float(fahrenheit) - 32.0) * 5.0 / 9.0
 
 
 def get_informational_screening_level(heat_index_c: float) -> InformationalScreeningLevel:
@@ -78,16 +84,21 @@ def get_informational_screening_level(heat_index_c: float) -> InformationalScree
 
 
 def calculate_heat_index(
-    temperature_c: float | None,
-    relative_humidity_pct: float | None,
+    temperature_c: float | Decimal | int | None,
+    relative_humidity_pct: float | Decimal | int | None,
     quality_status: str | None = "valid",
+    is_stale: bool = False,
+    custom_classifier: Callable[[float], str] | None = None,
 ) -> HeatIndexResult:
     """Calculate the NWS / Steadman / Rothfusz Heat Index deterministically.
 
     Args:
-        temperature_c: Dry-bulb air temperature in degrees Celsius.
+        temperature_c: Dry-bulb air temperature in degrees Celsius (float, Decimal, or int).
         relative_humidity_pct: Relative humidity in percent (0 to 100).
-        quality_status: Upstream data quality flag ('valid', 'suspect', 'invalid', 'missing').
+        quality_status: Upstream data quality flag ('valid', 'suspect', 'invalid', 'missing', 'stale').
+        is_stale: Whether reading age exceeds the freshness limit.
+        custom_classifier: Optional extension point callable to evaluate an unapproved or
+                           site-specific classification policy against the calculated Celsius index.
 
     Returns:
         Structured, explainable HeatIndexResult with numerical outputs, calculation
@@ -100,22 +111,46 @@ def calculate_heat_index(
         return HeatIndexResult(
             status=HeatIndexCalculationStatus.MISSING_DATA,
             equation_applied="none",
-            input_temperature_c=temperature_c,
-            input_relative_humidity_pct=relative_humidity_pct,
+            input_temperature_c=float(temperature_c) if temperature_c is not None else None,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=float(relative_humidity_pct) if relative_humidity_pct is not None else None,
+            input_humidity_unit="percent",
             informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
             limitations=STANDARD_LIMITATIONS,
             notes="Calculation unavailable: One or both required measurements (temperature, relative humidity) are missing.",
             calculated_at=now,
         )
 
-    # 2. Upstream quality checks
+    # 2. Staleness checks
+    if is_stale or quality_status == "stale":
+        temp_val = float(temperature_c) if not isinstance(temperature_c, (float, int, Decimal)) or not math.isnan(float(temperature_c)) else None
+        rh_val = float(relative_humidity_pct) if not isinstance(relative_humidity_pct, (float, int, Decimal)) or not math.isnan(float(relative_humidity_pct)) else None
+        return HeatIndexResult(
+            status=HeatIndexCalculationStatus.STALE,
+            equation_applied="none",
+            input_temperature_c=temp_val,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=rh_val,
+            input_humidity_unit="percent",
+            informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
+            limitations=STANDARD_LIMITATIONS,
+            notes="Calculation unavailable: Environmental reading is marked as stale (timestamp exceeds freshness limit).",
+            calculated_at=now,
+        )
+
+    # 3. Upstream quality checks
     if quality_status == "invalid":
         return HeatIndexResult(
             status=HeatIndexCalculationStatus.INVALID_QUALITY,
             equation_applied="none",
-            input_temperature_c=temperature_c,
-            input_relative_humidity_pct=relative_humidity_pct,
+            input_temperature_c=float(temperature_c) if not math.isnan(float(temperature_c)) else None,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=float(relative_humidity_pct) if not math.isnan(float(relative_humidity_pct)) else None,
+            input_humidity_unit="percent",
             informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
             limitations=STANDARD_LIMITATIONS,
             notes="Calculation rejected: Upstream reading was flagged with 'invalid' quality status.",
             calculated_at=now,
@@ -125,74 +160,121 @@ def calculate_heat_index(
         return HeatIndexResult(
             status=HeatIndexCalculationStatus.MISSING_DATA,
             equation_applied="none",
-            input_temperature_c=temperature_c,
-            input_relative_humidity_pct=relative_humidity_pct,
+            input_temperature_c=float(temperature_c) if not math.isnan(float(temperature_c)) else None,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=float(relative_humidity_pct) if not math.isnan(float(relative_humidity_pct)) else None,
+            input_humidity_unit="percent",
             informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
             limitations=STANDARD_LIMITATIONS,
             notes="Calculation rejected: Upstream reading was flagged with 'missing' quality status.",
             calculated_at=now,
         )
 
-    # 3. Numerical sanity checks
-    if math.isnan(temperature_c) or math.isinf(temperature_c) or math.isnan(relative_humidity_pct) or math.isinf(relative_humidity_pct):
+    # 4. Safe type conversion and finite sanity checks
+    try:
+        t_c = float(temperature_c)
+        rh = float(relative_humidity_pct)
+    except (ValueError, TypeError):
         return HeatIndexResult(
             status=HeatIndexCalculationStatus.INVALID_INPUT,
             equation_applied="none",
-            input_temperature_c=temperature_c,
-            input_relative_humidity_pct=relative_humidity_pct,
+            input_temperature_c=None,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=None,
+            input_humidity_unit="percent",
             informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
+            limitations=STANDARD_LIMITATIONS,
+            notes="Calculation failed: Non-numeric input types detected.",
+            calculated_at=now,
+        )
+
+    if math.isnan(t_c) or math.isinf(t_c) or math.isnan(rh) or math.isinf(rh):
+        return HeatIndexResult(
+            status=HeatIndexCalculationStatus.INVALID_INPUT,
+            equation_applied="none",
+            input_temperature_c=t_c if not (math.isnan(t_c) or math.isinf(t_c)) else None,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=rh if not (math.isnan(rh) or math.isinf(rh)) else None,
+            input_humidity_unit="percent",
+            informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
             limitations=STANDARD_LIMITATIONS,
             notes="Calculation failed: Non-finite numerical value detected (NaN or Infinity).",
             calculated_at=now,
         )
 
-    # 4. Relative humidity physical boundaries
-    if relative_humidity_pct < 0.0 or relative_humidity_pct > 100.0:
+    # 5. Physical atmospheric boundaries
+    if t_c < TEMP_PLAUSIBILITY_MIN_C or t_c > TEMP_PLAUSIBILITY_MAX_C:
         return HeatIndexResult(
             status=HeatIndexCalculationStatus.INVALID_INPUT,
             equation_applied="none",
-            input_temperature_c=temperature_c,
-            input_relative_humidity_pct=relative_humidity_pct,
+            input_temperature_c=t_c,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=rh,
+            input_humidity_unit="percent",
             informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
             limitations=STANDARD_LIMITATIONS,
-            notes=f"Calculation failed: Relative humidity {relative_humidity_pct}% is outside physically possible atmospheric bounds [0, 100].",
+            notes=f"Calculation failed: Air temperature {t_c:.1f}°C is outside physically plausible atmospheric bounds [{TEMP_PLAUSIBILITY_MIN_C}, {TEMP_PLAUSIBILITY_MAX_C}].",
             calculated_at=now,
         )
 
-    # 5. Method operating domain verification
-    if temperature_c < DOMAIN_MIN_TEMP_C:
+    if rh < 0.0 or rh > 100.0:
+        return HeatIndexResult(
+            status=HeatIndexCalculationStatus.INVALID_INPUT,
+            equation_applied="none",
+            input_temperature_c=t_c,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=rh,
+            input_humidity_unit="percent",
+            informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
+            limitations=STANDARD_LIMITATIONS,
+            notes=f"Calculation failed: Relative humidity {rh}% is outside physically possible atmospheric bounds [0, 100].",
+            calculated_at=now,
+        )
+
+    # 6. Method operating domain verification
+    if t_c < DOMAIN_MIN_TEMP_C:
         return HeatIndexResult(
             status=HeatIndexCalculationStatus.OUT_OF_DOMAIN,
             equation_applied="none",
-            input_temperature_c=temperature_c,
-            input_relative_humidity_pct=relative_humidity_pct,
+            input_temperature_c=t_c,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=rh,
+            input_humidity_unit="percent",
             informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
             limitations=STANDARD_LIMITATIONS,
             notes=(
-                f"Air temperature ({temperature_c:.1f}°C / {c_to_f(temperature_c):.1f}°F) is below the {DOMAIN_MIN_TEMP_C}°C "
+                f"Air temperature ({t_c:.1f}°C / {c_to_f(t_c):.1f}°F) is below the {DOMAIN_MIN_TEMP_C}°C "
                 "operating domain for heat-stress evaluation. Heat Index is defined only for warm/sultry conditions."
             ),
             calculated_at=now,
         )
 
-    if temperature_c > DOMAIN_MAX_TEMP_C:
+    if t_c > DOMAIN_MAX_TEMP_C:
         return HeatIndexResult(
             status=HeatIndexCalculationStatus.OUT_OF_DOMAIN,
             equation_applied="none",
-            input_temperature_c=temperature_c,
-            input_relative_humidity_pct=relative_humidity_pct,
+            input_temperature_c=t_c,
+            input_temperature_unit="celsius",
+            input_relative_humidity_pct=rh,
+            input_humidity_unit="percent",
             informational_screening_level=InformationalScreeningLevel.UNAVAILABLE,
+            custom_classification=None,
             limitations=STANDARD_LIMITATIONS,
             notes=(
-                f"Air temperature ({temperature_c:.1f}°C / {c_to_f(temperature_c):.1f}°F) exceeds the {DOMAIN_MAX_TEMP_C}°C "
+                f"Air temperature ({t_c:.1f}°C / {c_to_f(t_c):.1f}°F) exceeds the {DOMAIN_MAX_TEMP_C}°C "
                 "empirical upper boundary of the Rothfusz regression equation. Mathematical extrapolation is unverified."
             ),
             calculated_at=now,
         )
 
-    # 6. Mathematical Evaluation (NWS Algorithm)
-    t_f = c_to_f(temperature_c)
-    rh = relative_humidity_pct
+    # 7. Mathematical Evaluation (NWS Algorithm)
+    t_f = c_to_f(t_c)
 
     # Step A: Steadman's simple formula
     hi_simple_f = 0.5 * (t_f + 61.0 + ((t_f - 68.0) * 1.2) + (rh * 0.094))
@@ -234,13 +316,21 @@ def calculate_heat_index(
 
     hi_c = f_to_c(hi_f)
 
-    # 7. Quality status reconciliation and screening level
+    # 8. Quality status reconciliation and screening level
     status = HeatIndexCalculationStatus.VALID
     if quality_status == "suspect":
         status = HeatIndexCalculationStatus.SUSPECT_QUALITY
         branch_notes += " NOTE: Input measurements carry an upstream 'suspect' quality classification."
 
     screening_level = get_informational_screening_level(hi_c)
+
+    # 9. Optional custom classification policy extension point
+    custom_classification_val = None
+    if custom_classifier is not None:
+        try:
+            custom_classification_val = str(custom_classifier(hi_c))
+        except Exception as exc:
+            custom_classification_val = f"classification_error: {exc}"
 
     return HeatIndexResult(
         status=status,
@@ -251,9 +341,12 @@ def calculate_heat_index(
         method=METHOD_NAME,
         method_version=METHOD_VERSION,
         equation_applied=equation_branch,
-        input_temperature_c=temperature_c,
-        input_relative_humidity_pct=relative_humidity_pct,
+        input_temperature_c=t_c,
+        input_temperature_unit="celsius",
+        input_relative_humidity_pct=rh,
+        input_humidity_unit="percent",
         informational_screening_level=screening_level,
+        custom_classification=custom_classification_val,
         limitations=STANDARD_LIMITATIONS,
         notes=branch_notes,
         calculated_at=now,

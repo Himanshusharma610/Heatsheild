@@ -9,6 +9,8 @@ from typing import Literal
 import uuid
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.device import PaginationMeta
+
 
 class ReadingCreateRequest(BaseModel):
     """Schema for POST /api/v1/readings ingestion payload."""
@@ -108,3 +110,96 @@ class ReadingDeduplicatedResponse(BaseModel):
 
     data: ReadingData
     deduplicated: bool = True
+
+
+class LatestReadingItem(BaseModel):
+    """Latest reading record including device code."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    device_id: uuid.UUID
+    device_code: str
+    event_id: str
+    measured_at: datetime | None = None
+    received_at: datetime
+    temperature_c: float | None = None
+    relative_humidity_pct: float | None = None
+    quality_status: str
+    source_mode: str
+    firmware_version: str | None = None
+
+
+class LatestReadingsResponse(BaseModel):
+    """Response returned by GET /api/v1/readings/latest."""
+
+    data: list[LatestReadingItem]
+
+
+class ReadingHistoryItem(BaseModel):
+    """Historical reading record conforming to API contracts Section 4.3."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    device_id: uuid.UUID
+    device_code: str
+    event_id: str
+    measured_at: datetime | None = None
+    received_at: datetime
+    temperature_c: float | None = None
+    relative_humidity_pct: float | None = None
+    quality_status: str
+    source_mode: str
+    firmware_version: str | None = None
+    heat_index_c: float | None = None
+    heat_index_screening_level: str | None = None
+    heat_index_method: str | None = None
+
+
+class ReadingSummaryMetric(BaseModel):
+    """Descriptive statistics (min, max, mean) for a numeric metric."""
+
+    min: float | None = None
+    max: float | None = None
+    mean: float | None = None
+
+
+class ReadingHistorySummary(BaseModel):
+    """Descriptive statistical summary of readings in the queried window."""
+
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    total_readings: int = 0
+    valid_readings: int = 0
+    invalid_readings: int = 0
+    suspect_readings: int = 0
+    missing_readings: int = 0
+    temperature_c: ReadingSummaryMetric
+    relative_humidity_pct: ReadingSummaryMetric
+    heat_index_c: ReadingSummaryMetric
+    notes: str = (
+        "Descriptive statistics computed from valid readings only. Invalid/suspect "
+        "readings are excluded from temperature and humidity aggregates. Screening statistics only; "
+        "does not infer worker exposure duration, medical risk, or certified safety outcomes."
+    )
+
+
+class ReadingHistoryQueryMeta(BaseModel):
+    """Echo of query filters applied."""
+
+    device_id: uuid.UUID | None = None
+    worksite_id: uuid.UUID | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    quality_status: str | None = None
+
+
+class ReadingHistoryResponse(BaseModel):
+    """Response returned by GET /api/v1/readings/history adhering to API contracts."""
+
+    data: list[ReadingHistoryItem]
+    pagination: PaginationMeta
+    query: ReadingHistoryQueryMeta
+    summary: ReadingHistorySummary
+

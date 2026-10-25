@@ -1,0 +1,91 @@
+# ==============================================================================
+# HeatShield Bharat — Production Multi-Container Orchestration
+# ==============================================================================
+# Services:
+# 1. postgres: PostgreSQL 15 relational persistence with persistent volume.
+# 2. backend: FastAPI Python ASGI service with automatic Alembic migrations.
+# 3. frontend: Production Nginx serving compiled React assets & reverse-proxying /api.
+# ==============================================================================
+
+name: heatshield-bharat
+
+services:
+  postgres:
+    image: docker.io/library/postgres:15-alpine
+    container_name: heatshield-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-heatshield}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Error: POSTGRES_PASSWORD must be set in environment}
+      POSTGRES_DB: ${POSTGRES_DB:-heatshield_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-heatshield} -d ${POSTGRES_DB:-heatshield_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - heatshield-net
+    # Port 5432 is kept internal; uncomment only for direct external host administration
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: heatshield-backend
+    restart: unless-stopped
+    environment:
+      APP_NAME: "HeatShield Bharat API"
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: "false"
+      SECRET_KEY: ${SECRET_KEY:?Error: SECRET_KEY must be set in environment (min 32 chars)}
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-heatshield}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-heatshield_prod}"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: "true"
+      WORKERS: ${BACKEND_WORKERS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - heatshield-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: "/api/v1"
+    container_name: heatshield-frontend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - heatshield-net
+
+networks:
+  heatshield-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local

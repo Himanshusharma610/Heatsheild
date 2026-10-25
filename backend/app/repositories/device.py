@@ -80,6 +80,45 @@ def list_devices_by_worksite(
     return list(session.scalars(stmt).all())
 
 
+def list_devices(
+    session: Session,
+    worksite_id: uuid.UUID | None = None,
+    status: str | None = None,
+    is_active: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Device]:
+    """List devices with optional filtering by worksite, status, and active flag."""
+    stmt = select(Device)
+    if worksite_id is not None:
+        stmt = stmt.where(Device.worksite_id == worksite_id)
+    if status is not None:
+        stmt = stmt.where(Device.status == status)
+    if is_active is not None:
+        stmt = stmt.where(Device.is_active == is_active)
+    stmt = stmt.order_by(Device.device_code.asc()).limit(limit).offset(offset)
+    return list(session.scalars(stmt).all())
+
+
+def count_devices(
+    session: Session,
+    worksite_id: uuid.UUID | None = None,
+    status: str | None = None,
+    is_active: bool | None = None,
+) -> int:
+    """Count devices matching filter criteria."""
+    from sqlalchemy import func
+
+    stmt = select(func.count(Device.id))
+    if worksite_id is not None:
+        stmt = stmt.where(Device.worksite_id == worksite_id)
+    if status is not None:
+        stmt = stmt.where(Device.status == status)
+    if is_active is not None:
+        stmt = stmt.where(Device.is_active == is_active)
+    return session.scalar(stmt) or 0
+
+
 def update_device_heartbeat(
     session: Session,
     device_id: uuid.UUID,

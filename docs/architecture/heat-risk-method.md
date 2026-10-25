@@ -110,11 +110,13 @@ $$HI_F = HI_{\text{full}}$$
 
 | Input Condition | Engine Status | Output Value | Safety Rationale |
 | :--- | :--- | :--- | :--- |
+| **$T_C < -50.0^\circ\text{C}$ or $T_C > 100.0^\circ\text{C}$** | `invalid_input` | `None` | Exceeds physically plausible terrestrial atmospheric range. |
 | **$T_C < 20.0^\circ\text{C}$** ($< 68^\circ\text{F}$) | `out_of_domain` | `None` | Below heat-stress threshold. Heat Index cannot evaluate cold environments or windchill. |
 | **$T_C > 55.0^\circ\text{C}$** ($> 131^\circ\text{F}$) | `out_of_domain` | `None` | Exceeds empirical boundary of the Rothfusz regression. Polynomial extrapolation produces mathematical artifacts. |
 | **$RH < 0\%$ or $RH > 100\%$** | `invalid_input` | `None` | Physically impossible atmospheric relative humidity. |
 | **$T_C$ or $RH$ is `None`** | `missing_data` | `None` | Calculation cannot occur. Never substitute zero or default values. |
 | **$T_C$ or $RH$ is NaN / Inf** | `invalid_input` | `None` | Numerical corruption detected. |
+| **Reading is stale (`is_stale=True` / `stale`)** | `stale` | `None` | Reading timestamp exceeds maximum freshness window; cannot evaluate real-time conditions. |
 | **Reading quality is `invalid`** | `invalid_quality` | `None` | Upstream sensor communication or CRC failure. |
 | **Reading quality is `suspect`** | `suspect_quality` | Evaluated | Result is returned with a mandatory audit warning note. |
 
@@ -136,8 +138,9 @@ Occupational heat stress standards (e.g. ISO 7243, ACGIH TLVs, OSHA guidance, an
 
 ---
 
-## 6. Provisional Informational Screening Categories
+## 6. Provisional Informational Screening Categories & Policy Extension Point
 
+### 6.1 Provisional NOAA Screening Categories
 The project provides an optional `informational_screening_level` mapping based on NOAA public safety advisories for informational decision-support only:
 
 | Heat Index ($^\circ\text{C}$) | Heat Index ($^\circ\text{F}$) | Screening Level | NOAA Warning Descriptor |
@@ -147,10 +150,22 @@ The project provides an optional `informational_screening_level` mapping based o
 | **$32.2^\circ\text{C} - 39.4^\circ\text{C}$** | $90^\circ\text{F} - 103^\circ\text{F}$ | `EXTREME_CAUTION` | Heat cramps and heat exhaustion possible |
 | **$39.4^\circ\text{C} - 51.7^\circ\text{C}$** | $103^\circ\text{F} - 125^\circ\text{F}$ | `DANGER` | Heat cramps and heat exhaustion likely; heatstroke possible |
 | **$\ge 51.7^\circ\text{C}$** | $\ge 125^\circ\text{F}$ | `EXTREME_DANGER` | Heatstroke highly likely |
-| **Missing / Out-of-Domain** | — | `UNAVAILABLE` | Calculation cannot evaluate; never defaults to normal |
+| **Missing / Out-of-Domain / Stale** | — | `UNAVAILABLE` | Calculation cannot evaluate; never defaults to normal |
 
 > [!WARNING]
 > **UNAPPROVED STATUS:** The categories above are NOAA educational screening descriptors. They are **NOT** an officially approved occupational standard for Indian worksites. Regulatory worksite thresholds must be configured explicitly in Module 8 alert rules based on certified regional guidance.
+
+### 6.2 Policy Extension Point
+To support unapproved, emerging, or site-specific classification models without hardcoding them into the core engine, `calculate_heat_index` provides a `custom_classifier` parameter:
+```python
+def my_classifier(heat_index_c: float) -> str:
+    if heat_index_c >= 42.0:
+        return "RED_WORK_HALT"
+    return "YELLOW_ADVISORY"
+
+result = calculate_heat_index(38.0, 75.0, custom_classifier=my_classifier)
+```
+If the reading is invalid, missing, or stale, `custom_classification` is guaranteed to be `None`, preventing any false low-risk categorization.
 
 ---
 

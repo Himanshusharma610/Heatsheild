@@ -14,6 +14,7 @@ Verifies:
 11. API endpoint integration: POST /api/v1/readings/calculate-heat-index
 """
 
+from decimal import Decimal
 import math
 import pytest
 from fastapi.testclient import TestClient
@@ -169,6 +170,17 @@ def test_invalid_relative_humidity():
     assert res_over.value_c is None
 
 
+def test_physical_extreme_temperatures():
+    """Temperatures outside atmospheric plausibility [-50, 100] return invalid_input."""
+    res_extreme_cold = calculate_heat_index(-60.0, 50.0)
+    assert res_extreme_cold.status == HeatIndexCalculationStatus.INVALID_INPUT
+    assert res_extreme_cold.value_c is None
+
+    res_extreme_hot = calculate_heat_index(120.0, 50.0)
+    assert res_extreme_hot.status == HeatIndexCalculationStatus.INVALID_INPUT
+    assert res_extreme_hot.value_c is None
+
+
 # ==============================================================================
 # 5. Missing & Non-Finite Inputs
 # ==============================================================================
@@ -201,7 +213,7 @@ def test_non_finite_inputs():
 
 
 # ==============================================================================
-# 6. Quality Status Propagation
+# 6. Quality Status and Staleness Propagation
 # ==============================================================================
 
 def test_quality_status_handling():
@@ -223,18 +235,54 @@ def test_quality_status_handling():
     assert "suspect" in res_suspect.notes
 
 
+def test_stale_reading_handling():
+    """Stale readings return STALE status and never evaluate to a false low-risk number."""
+    # Via is_stale boolean flag
+    res_stale_bool = calculate_heat_index(34.0, 65.0, is_stale=True)
+    assert res_stale_bool.status == HeatIndexCalculationStatus.STALE
+    assert res_stale_bool.value_c is None
+    assert res_stale_bool.informational_screening_level == InformationalScreeningLevel.UNAVAILABLE
+    assert "stale" in res_stale_bool.notes
+
+    # Via quality_status string
+    res_stale_str = calculate_heat_index(34.0, 65.0, quality_status="stale")
+    assert res_stale_str.status == HeatIndexCalculationStatus.STALE
+    assert res_stale_str.value_c is None
+    assert res_stale_str.informational_screening_level == InformationalScreeningLevel.UNAVAILABLE
+
+
 # ==============================================================================
-# 7. Traceability, Determinism & Limitations
+# 7. Decimal Support from Database ORM Models
+# ==============================================================================
+
+def test_decimal_inputs_from_database_model():
+    """SensorReading Decimal values are handled without TypeError."""
+    temp_dec = Decimal("35.0")
+    rh_dec = Decimal("60.0")
+
+    result = calculate_heat_index(temp_dec, rh_dec)
+    assert result.status == HeatIndexCalculationStatus.VALID
+    assert result.value_c is not None
+    assert result.value_f is not None
+    assert isinstance(result.input_temperature_c, float)
+    assert isinstance(result.input_relative_humidity_pct, float)
+
+
+# ==============================================================================
+# 8. Traceability, Determinism, Units & Limitations
 # ==============================================================================
 
 def test_traceability_and_limitations():
-    """Every result includes method version, input provenance, and scientific disclaimers."""
+    """Every result includes method version, input provenance with units, and scientific disclaimers."""
     result = calculate_heat_index(36.0, 65.0)
 
     assert result.method == "NWS_ROTHFUSZ_1990"
     assert result.method_version == "1.0.0"
     assert result.input_temperature_c == 36.0
+    assert result.input_temperature_unit == "celsius"
     assert result.input_relative_humidity_pct == 65.0
+    assert result.input_humidity_unit == "percent"
+    assert result.unit == "celsius"
     assert len(result.limitations) >= 5
     assert any("NOT Wet Bulb Globe Temperature" in item for item in result.limitations)
     assert any("sunlight" in item for item in result.limitations)
@@ -252,8 +300,26 @@ def test_calculation_determinism():
     assert res1.informational_screening_level == res2.informational_screening_level
 
 
+def test_custom_classifier_extension_point():
+    """Separately configured classification policies can be injected via extension point."""
+    def sample_worksite_policy(hi_c: float) -> str:
+        if hi_c >= 40.0:
+            return "MANDATORY_WATER_BREAK"
+        return "STANDARD_MONITORING"
+
+    # Evaluated condition
+    res_high = calculate_heat_index(38.0, 70.0, custom_classifier=sample_worksite_policy)
+    assert res_high.status == HeatIndexCalculationStatus.VALID
+    assert res_high.custom_classification == "MANDATORY_WATER_BREAK"
+
+    # Stale/unavailable condition ensures custom_classification is None (never false low-risk)
+    res_stale = calculate_heat_index(38.0, 70.0, is_stale=True, custom_classifier=sample_worksite_policy)
+    assert res_stale.status == HeatIndexCalculationStatus.STALE
+    assert res_stale.custom_classification is None
+
+
 # ==============================================================================
-# 8. API Endpoint Integration Tests
+# 9. API Endpoint Integration Tests
 # ==============================================================================
 
 @pytest.fixture
@@ -285,10 +351,28 @@ def test_api_calculate_heat_index_success(client: TestClient):
     assert data["value_c"] is not None
     assert data["value_f"] is not None
     assert data["unit"] == "celsius"
+    assert data["input_temperature_unit"] == "celsius"
+    assert data["input_humidity_unit"] == "percent"
     assert data["method"] == "NWS_ROTHFUSZ_1990"
     assert data["method_version"] == "1.0.0"
     assert "limitations" in data
     assert len(data["limitations"]) > 0
+
+
+def test_api_calculate_heat_index_stale(client: TestClient):
+    """Stale reading requests return 200 with stale status and null value."""
+    payload = {
+        "temperature_c": 35.0,
+        "relative_humidity_pct": 60.0,
+        "is_stale": True,
+    }
+    response = client.post("/api/v1/readings/calculate-heat-index", json=payload)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["status"] == "stale"
+    assert data["value_c"] is None
+    assert data["informational_screening_level"] == "unavailable"
 
 
 def test_api_calculate_heat_index_out_of_domain(client: TestClient):
@@ -318,3 +402,4 @@ def test_api_calculate_heat_index_missing_fields(client: TestClient):
     data = response.json()
     assert data["status"] == "missing_data"
     assert data["value_c"] is None
+

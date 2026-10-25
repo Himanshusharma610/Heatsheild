@@ -1,0 +1,108 @@
+name: HeatShield Bharat CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  firmware-checks:
+    name: Firmware Contracts & Host Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python test runner
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest jsonschema
+
+      - name: Run Schema Parity Tests
+        run: |
+          pytest firmware/tests/test_firmware_contract.py -v
+
+      - name: Run Host C++ Unit Tests (HAL)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror firmware/tests/test_firmware.cpp -o firmware/tests/test_runner
+          ./firmware/tests/test_runner
+          rm -f firmware/tests/test_runner
+
+  backend-tests:
+    name: Backend Test Suite & Quality
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: heatshield_test
+          POSTGRES_PASSWORD: heatshield_test_pw
+          POSTGRES_DB: heatshield_test
+        ports:
+          - 54332:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Backend Pytest Suite
+        env:
+          POSTGRES_TEST_URL: "postgresql+psycopg2://heatshield_test:heatshield_test_pw@127.0.0.1:54332/heatshield_test"
+          JWT_SECRET_KEY: "ci-ephemeral-jwt-test-key-32-bytes-minimum"
+        run: |
+          PYTHONPATH=backend pytest backend/tests/ -v
+
+  frontend-tests:
+    name: Frontend Quality, Tests & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck TypeScript
+        run: npm run typecheck
+
+      - name: Lint codebase
+        run: npm run lint
+
+      - name: Run Vitest Suite
+        run: npm run test -- --run
+
+      - name: Verify Production Build
+        run: npm run build

@@ -199,10 +199,14 @@ See [firmware/README.md](firmware/README.md).
 | **Module 5 — ESP32 Firmware Scaffolding & Sensor HAL** | ✅ Complete *(Scaffolding & HAL; Hardware UNCONFIRMED)* |
 | **Module 6 — Telemetry Ingestion & Reliability** | ✅ Complete |
 | **Module 7 — Heat-Risk Engine & Calculation** | ✅ Complete |
-| Module 8 — Alerts & Notifications | 🔲 Not started |
-| Module 9 — Frontend Dashboard | 🔲 Not started |
-| Module 10 — Integration & End-to-End Testing | 🔲 Not started |
-| Module 11+ — Deployment & Production Hardening | 🔲 Not started |
+| **Module 8 — Alert Rules and Alert Lifecycle** | ✅ Complete |
+| **Module 9 — React Frontend Foundation** | ✅ Complete |
+| **Module 10 — Live Monitoring Dashboard and Device Status** | ✅ Complete |
+| **Module 11 — Historical Data, Charts and Analytics** | ✅ Complete |
+| **Module 12 — Authentication and Role-Based Access Control** | ✅ Complete |
+| **Module 13 — End-to-End Integration and Automated Testing** | ✅ Complete |
+| **Module 14 — Deployment and Operational Readiness** | ✅ Complete |
+| Module 15+ — Field Validation, Physical Calibration & Packaging | 🔲 Blocked (Pending Hardware) |
 
 ### Implemented features
 
@@ -235,24 +239,69 @@ See [firmware/README.md](firmware/README.md).
 - Telemetry quality classification engine (`valid`, `suspect`, `invalid`, `missing`) with timestamp drift reconciliation.
 - Explainable Heat-Risk Calculation Engine (`app/services/heat_index.py`) implementing the authoritative NWS Rothfusz (1990) equation and Steadman (1979) physiological apparent temperature model.
 - Transparent calculation endpoint (`POST /api/v1/readings/calculate-heat-index`) with formula versioning, equation-branch tracking, domain safety limits (20°C to 55°C), and explicit scientific limitations (distinguishing Heat Index from WBGT).
-- Comprehensive test suites: 71 backend tests (including real PostgreSQL 15 integration tests), 16 host C++ unit tests, and 5 contract parity tests (92 total automated tests).
+- Alert Rules engine supporting configurable environmental thresholds (`temperature_c`, `relative_humidity_pct`, `heat_index_c`) with numerical bounds and operator validation (`gt`, `gte`, `lt`, `lte`, `eq`).
+- Deterministic alert evaluation service (`app/services/alert_engine.py`) integrating Module 7 Heat Index calculations with fail-safe handling (missing/stale data never assumed safe).
+- Episode deduplication policy (`device:{device_id}:rule:{rule_id}`) preventing duplicate active alert creation during ongoing sustained heat incidents.
+- Supervisor acknowledgement and resolution lifecycle (`triggered` -> `acknowledged` -> `resolved`, plus `expired`) with audit trail logging in `alert_acknowledgements`.
+- Role-based authorization (`app/core/user_auth.py`) strictly isolating device tokens (`X-Device-Token`) from supervisor management endpoints (`/api/v1/alerts`, `/api/v1/alert-rules`).
+- React 19 + TypeScript + Vite frontend foundation with client-side routing (React Router v7), responsive layout, and custom industrial safety Vanilla CSS design system.
+- Accessible UI states: `LoadingState` (role="status"), `ErrorState` (role="alert"), `EmptyState`, and `StatusBadge` (combining icons, text labels, and color).
+- Type-safe API client (`services/api.ts`) with timeout handling, network failure recovery, JSON safety, and environment-driven base URL (`VITE_API_BASE_URL`).
+- Live backend readiness probe integrating `GET /ready` and `GET /health` into the navigation header and Overview page.
+- Real API integration for Module 8 alerts (`GET /api/v1/alerts`, `GET /api/v1/alert-rules`) and interactive testbench for Module 7 Heat-Risk calculations (`POST /api/v1/readings/calculate-heat-index`).
+- Module 10 Live Monitoring Dashboard (`/`) displaying real-time environmental metrics (temperature in °C, humidity in %, quality status, measured/server timestamps), Module 7 NWS heat index screening, Module 8 active alert summary, and registered device inventory.
+- Bounded polling refresh engine with configurable intervals (10s, 15s default, 30s, 60s, paused), overlap prevention, unmount timer cleanup, and cached-stale banner on network failure.
+- Module 11 Historical Data API (`GET /api/v1/readings/history`) with bounded date-range validation (max 30 days), deterministic ordering, SQL-level min/max/mean metrics, and alert-history filtering by time window (`GET /api/v1/alerts?start_time=...&end_time=...`).
+- Module 11 Historical Analytics & Charts (`/analytics`): pure SVG time-series charts (temperature in °C, humidity in %, and NOAA Rothfusz heat index in °C) with gap detection (breaks lines on missing readings or gaps > 45 minutes; never plots zero for missing measurements), summary cards, and paginated telemetry table.
+- **Module 12 Human Authentication & RBAC**:
+  - Secure password hashing using Argon2id with OWASP recommended cost parameters.
+  - JWT Bearer access token generation with configurable expiration window (`AUTH_TOKEN_EXPIRE_MINUTES`) and HMAC-SHA256 signature verification.
+  - Role hierarchy with server-side enforcement: `admin` (user management, configuration), `supervisor` (alert acknowledgement, resolution, rule management), and `viewer` (read-only monitoring access).
+  - Strict two-way credential isolation: IoT device tokens (`X-Device-Token`) are rejected on human endpoints, and user tokens are rejected on device ingestion (`POST /api/v1/readings`).
+  - Administrative user provisioning script (`app.cli.provision_admin`) preventing default hardcoded credentials.
+  - User lifecycle endpoints (`POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `POST /api/v1/auth/logout`, `GET /api/v1/users`, `POST /api/v1/users`, `PATCH /api/v1/users/{id}`) with self-lockout prevention.
+  - Frontend authentication: Sign In page (`/login`), `AuthContext`, session-scoped token storage (`sessionStorage`), automatic Bearer header injection, 401 session expiry handling, route protection (`ProtectedRoute`), and role-aware UI controls in `AlertsPage` and `Header`.
+- **Module 13 End-to-End Integration & Testing**:
+  - Master test execution script (`scripts/run_all_tests.sh`) executing firmware contracts, host C++ HAL tests, backend pytest suites, frontend TypeScript/lint checks, Vitest suites, and production build verification.
+  - End-to-end integration test suite (`backend/tests/test_end_to_end_integration.py`) verifying full data lifecycle: validated ingestion -> deduplication -> PostgreSQL persistence -> heat-risk calculation -> alert triggering -> supervisor ack/resolve audit trail -> viewer query -> two-way credential segregation.
+  - Resilience and failure test suite (`backend/tests/test_resilience_and_failures.py`) covering 16 error scenarios: unauthorized devices, conflicting duplicate payloads, non-finite inputs, clock skew, out-of-domain temperatures, inverted query windows, deactivated user tokens, and simulated DB connection failures.
+  - Frontend end-to-end integration tests (`frontend/src/test/IntegrationE2E.test.tsx`) verifying route redirects, telemetry units (°C and %), missing value handling ("Unavailable" without converting to zero), stale data warnings, and role-based alert controls.
+  - GitHub Actions CI workflow (`.github/workflows/ci.yml`) with automated PostgreSQL 15 test service container.
+  - Integration test documentation report ([docs/testing/integration-test-report.md](docs/testing/integration-test-report.md)).
+- **Module 14 Deployment and Operational Readiness**:
+  - Reproducible multi-service container orchestration using Docker Compose (`docker-compose.yml`) coordinating PostgreSQL 15 with persistent storage volume (`heatshield_pgdata`), FastAPI ASGI application, and Nginx reverse proxy.
+  - Multi-stage Docker build for backend (`backend/Dockerfile`) with Python 3.12-slim-bookworm, non-root user execution (`heatshield` UID 10001), automated dependency installation, explicit migration runner (`backend/scripts/start.sh`), and healthcheck probes.
+  - Multi-stage Docker build for frontend (`frontend/Dockerfile`) with Node 22 build environment, Alpine Nginx runtime, SPA HTML5 routing fallback (`try_files $uri $uri/ /index.html`), API reverse proxy (`/api/` -> `http://backend:8000/api/`), gzip compression, and HTTP security headers.
+  - Strict production settings validation (`backend/app/config.py`): in production (`APP_ENV=production`), enforces `DEBUG=False`, non-default `SECRET_KEY` >= 32 characters, PostgreSQL database URI (rejects SQLite), and forbids wildcard `*` CORS origins without crashing or printing secret values.
+  - Explicit database migration discipline (`alembic upgrade head`) preserving existing data, with documented backup/restore procedures (`pg_dump` / `pg_restore`).
+  - Operational runbook (`docs/deployment/runbook.md`) documenting topology, environment variable references, provisioning, migration, rollback, backup, secret rotation, and troubleshooting procedures.
+  - Comprehensive deployment test suite (`backend/tests/test_deployment_config.py`) verifying dev defaults, test mode, and production security validation invariants.
+- Honest hardware state representation: physical ESP32 boards unconfirmed, missing readings displayed as "Unavailable" without assuming zero, and stale data explicitly tagged.
+- Comprehensive automated test suites: 47 frontend Vitest tests (100% pass) and 178 backend/firmware tests (225 total passing automated software tests; 148 backend unit tests + 21 firmware contract/HAL tests + 8 skipped real-PostgreSQL integration tests).
+
+### Testing & Verification
+
+To run all automated test suites across all project layers in one command:
+```bash
+./scripts/run_all_tests.sh
+```
 
 ### Planned features (not yet implemented)
 
 - Physical hardware procurement and driver integration (Module 5 Phase 2).
-- Alert rules and notification dispatch workflow (Module 8).
-- Frontend React dashboard (Module 9).
-- Integration and end-to-end testing (Module 10).
-- Deployment and production hardening (Module 11+).
 
 ---
 
 ## Documentation
 
+- [Deployment & Operational Runbook](docs/deployment/runbook.md)
+- [End-to-End Testing & Integration Report](docs/testing/integration-test-report.md)
+- [Frontend Documentation](frontend/README.md)
 - [Backend Documentation](backend/README.md)
 - [Firmware Documentation & Scaffolding](firmware/README.md)
 - [Hardware Selection & Physical Integration Guide](docs/hardware/hardware-selection.md)
 - [Heat-Risk Calculation Method & Explainability](docs/architecture/heat-risk-method.md)
+- [Alert Lifecycle & Deduplication Specification](docs/architecture/alert-lifecycle.md)
 - [Architecture Overview](docs/architecture/overview.md)
 - [System Architecture](docs/architecture/system-architecture.md)
 - [Data Flow Specification](docs/architecture/data-flow.md)

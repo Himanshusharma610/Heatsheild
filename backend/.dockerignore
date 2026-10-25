@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Python caches and virtual environments
+.venv
+venv
+ENV
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+
+# Environment and secrets
+.env
+*.env
+*.pem
+*.key
+
+# Temporary files and logs
+*.log
+*.sqlite3
+.DS_Store

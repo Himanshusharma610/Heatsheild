@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 import uuid
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.alert import Alert, AlertAcknowledgement, AlertRule
+from app.models.device import Device
 
 
 def create_alert_rule(
@@ -57,6 +58,43 @@ def list_active_alert_rules(
     return list(session.scalars(stmt).all())
 
 
+def list_alert_rules(
+    session: Session,
+    worksite_id: uuid.UUID | None = None,
+    is_enabled: bool | None = None,
+    severity: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[AlertRule]:
+    """Retrieve alert rules with optional filtering and pagination."""
+    stmt = select(AlertRule)
+    if worksite_id is not None:
+        stmt = stmt.where((AlertRule.worksite_id == worksite_id) | (AlertRule.worksite_id.is_(None)))
+    if is_enabled is not None:
+        stmt = stmt.where(AlertRule.is_enabled == is_enabled)
+    if severity is not None:
+        stmt = stmt.where(AlertRule.severity == severity)
+    stmt = stmt.order_by(AlertRule.name.asc()).limit(limit).offset(offset)
+    return list(session.scalars(stmt).all())
+
+
+def count_alert_rules(
+    session: Session,
+    worksite_id: uuid.UUID | None = None,
+    is_enabled: bool | None = None,
+    severity: str | None = None,
+) -> int:
+    """Count alert rules matching filters."""
+    stmt = select(func.count(AlertRule.id))
+    if worksite_id is not None:
+        stmt = stmt.where((AlertRule.worksite_id == worksite_id) | (AlertRule.worksite_id.is_(None)))
+    if is_enabled is not None:
+        stmt = stmt.where(AlertRule.is_enabled == is_enabled)
+    if severity is not None:
+        stmt = stmt.where(AlertRule.severity == severity)
+    return session.scalar(stmt) or 0
+
+
 def create_alert(
     session: Session,
     device_id: uuid.UUID,
@@ -67,6 +105,7 @@ def create_alert(
     alert_rule_id: uuid.UUID | None = None,
     rule_version_snapshot: int | None = None,
     deduplication_key: str | None = None,
+    triggered_at: datetime | None = None,
 ) -> Alert:
     """Create a new alert event."""
     alert = Alert(
@@ -79,14 +118,21 @@ def create_alert(
         rule_version_snapshot=rule_version_snapshot,
         deduplication_key=deduplication_key,
     )
+    if triggered_at is not None:
+        alert.triggered_at = triggered_at
     session.add(alert)
     session.flush()
     return alert
 
 
 def get_alert_by_id(session: Session, alert_id: uuid.UUID) -> Alert | None:
-    """Retrieve alert by primary key."""
-    return session.get(Alert, alert_id)
+    """Retrieve alert by primary key with preloaded relationships."""
+    stmt = (
+        select(Alert)
+        .options(joinedload(Alert.device), joinedload(Alert.alert_rule), joinedload(Alert.acknowledgements))
+        .where(Alert.id == alert_id)
+    )
+    return session.scalars(stmt).first()
 
 
 def get_active_alert_by_dedup_key(session: Session, deduplication_key: str) -> Alert | None:
@@ -106,21 +152,59 @@ def get_active_alert_by_dedup_key(session: Session, deduplication_key: str) -> A
 def list_alerts(
     session: Session,
     device_id: uuid.UUID | None = None,
+    worksite_id: uuid.UUID | None = None,
     status: str | None = None,
     severity: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Alert]:
     """List alerts with optional filtering and pagination."""
-    stmt = select(Alert)
+    stmt = (
+        select(Alert)
+        .options(joinedload(Alert.device), joinedload(Alert.alert_rule))
+    )
+    if worksite_id is not None:
+        stmt = stmt.join(Device, Alert.device_id == Device.id).where(Device.worksite_id == worksite_id)
     if device_id is not None:
         stmt = stmt.where(Alert.device_id == device_id)
     if status is not None:
         stmt = stmt.where(Alert.status == status)
     if severity is not None:
         stmt = stmt.where(Alert.severity == severity)
+    if start_time is not None:
+        stmt = stmt.where(Alert.triggered_at >= start_time)
+    if end_time is not None:
+        stmt = stmt.where(Alert.triggered_at <= end_time)
     stmt = stmt.order_by(Alert.triggered_at.desc()).limit(limit).offset(offset)
     return list(session.scalars(stmt).all())
+
+
+def count_alerts(
+    session: Session,
+    device_id: uuid.UUID | None = None,
+    worksite_id: uuid.UUID | None = None,
+    status: str | None = None,
+    severity: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> int:
+    """Count total alerts matching filters for pagination."""
+    stmt = select(func.count(Alert.id))
+    if worksite_id is not None:
+        stmt = stmt.join(Device, Alert.device_id == Device.id).where(Device.worksite_id == worksite_id)
+    if device_id is not None:
+        stmt = stmt.where(Alert.device_id == device_id)
+    if status is not None:
+        stmt = stmt.where(Alert.status == status)
+    if severity is not None:
+        stmt = stmt.where(Alert.severity == severity)
+    if start_time is not None:
+        stmt = stmt.where(Alert.triggered_at >= start_time)
+    if end_time is not None:
+        stmt = stmt.where(Alert.triggered_at <= end_time)
+    return session.scalar(stmt) or 0
 
 
 def acknowledge_alert(

@@ -21,6 +21,7 @@ from app.models.reading import SensorReading
 from app.repositories.device import update_device_heartbeat
 from app.repositories.reading import create_reading, get_reading_by_device_and_event
 from app.schemas.reading import ReadingCreateRequest
+from app.services.alert_engine import evaluate_reading_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,10 @@ def ingest_telemetry_reading(
             seen_at=received_at,
             firmware_version=payload.firmware_version,
         )
+
+        # Step 4: Evaluate active alert rules for valid environmental readings
+        if quality_status == "valid":
+            evaluate_reading_alerts(session=session, reading=reading, device=device)
 
         session.commit()
         logger.info(

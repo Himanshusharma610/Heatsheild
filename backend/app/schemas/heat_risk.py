@@ -20,6 +20,7 @@ class HeatIndexCalculationStatus(str, Enum):
     MISSING_DATA = "missing_data"
     INVALID_INPUT = "invalid_input"
     INVALID_QUALITY = "invalid_quality"
+    STALE = "stale"
 
 
 class InformationalScreeningLevel(str, Enum):
@@ -52,9 +53,13 @@ class HeatIndexCalculationRequest(BaseModel):
         description="Relative humidity percentage (0 to 100).",
         examples=[65.0],
     )
-    quality_status: Literal["valid", "suspect", "invalid", "missing"] | None = Field(
+    quality_status: Literal["valid", "suspect", "invalid", "missing", "stale"] | None = Field(
         default="valid",
         description="Upstream data quality classification from reading validation engine.",
+    )
+    is_stale: bool = Field(
+        default=False,
+        description="Indicates whether the reading timestamp exceeds the maximum freshness threshold.",
     )
 
     @field_validator("temperature_c", "relative_humidity_pct")
@@ -108,9 +113,17 @@ class HeatIndexResult(BaseModel):
         default=None,
         description="Input dry-bulb air temperature in degrees Celsius.",
     )
+    input_temperature_unit: str = Field(
+        default="celsius",
+        description="Unit of input dry-bulb temperature.",
+    )
     input_relative_humidity_pct: float | None = Field(
         default=None,
         description="Input relative humidity in percent.",
+    )
+    input_humidity_unit: str = Field(
+        default="percent",
+        description="Unit of input relative humidity.",
     )
     informational_screening_level: InformationalScreeningLevel = Field(
         default=InformationalScreeningLevel.UNAVAILABLE,
@@ -118,6 +131,10 @@ class HeatIndexResult(BaseModel):
             "Provisional NOAA reference screening level. DISCLAIMER: Informational only; "
             "not an approved Indian occupational safety standard."
         ),
+    )
+    custom_classification: str | None = Field(
+        default=None,
+        description="Classification outcome from an optional external policy extension point.",
     )
     limitations: list[str] = Field(
         ...,

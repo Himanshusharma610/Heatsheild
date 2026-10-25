@@ -7,7 +7,7 @@ from accidental exposure.
 
 from functools import lru_cache
 from typing import Literal
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,10 +43,15 @@ class Settings(BaseSettings):
         description="Logging level",
     )
 
-    # Security
+    # Security & Authentication (Module 12)
     SECRET_KEY: SecretStr = Field(
         default=SecretStr("dev-insecure-secret-key-change-in-production"),
         description="Secret key for cryptographic signing (must be overridden in production)",
+    )
+    AUTH_ALGORITHM: str = Field(default="HS256", description="Cryptographic signing algorithm for JWT tokens")
+    AUTH_TOKEN_EXPIRE_MINUTES: int = Field(
+        default=480,
+        description="Access token validity lifetime in minutes (default 8 hours)",
     )
 
     # CORS origins
@@ -98,6 +103,39 @@ class Settings(BaseSettings):
         """Ensure API prefix starts with / and does not end with /."""
         cleaned = "/" + value.strip("/")
         return cleaned
+
+    @model_validator(mode="after")
+    def validate_production_invariants(self) -> "Settings":
+        """Strict production configuration integrity validation."""
+        if self.APP_ENV == "production":
+            # 1. Debug mode must never be active in production
+            if self.DEBUG:
+                raise ValueError("DEBUG must be set to False when APP_ENV is 'production'.")
+
+            # 2. Cryptographic secret key must be explicitly overridden and meet minimum entropy
+            raw_secret = self.SECRET_KEY.get_secret_value()
+            if raw_secret in ("dev-insecure-secret-key-change-in-production", "secret", "changeme", "password"):
+                raise ValueError(
+                    "Default or insecure SECRET_KEY cannot be used when APP_ENV is 'production'. "
+                    "Set a cryptographically strong SECRET_KEY (minimum 32 characters)."
+                )
+            if len(raw_secret) < 32:
+                raise ValueError(
+                    f"SECRET_KEY entropy insufficient for production (length {len(raw_secret)} < 32). "
+                    "Provide at least a 32-character high-entropy secret key."
+                )
+
+            # 3. Persistent PostgreSQL database URL must be configured
+            if not self.DATABASE_URL:
+                raise ValueError("DATABASE_URL must be configured when APP_ENV is 'production'.")
+            if "sqlite" in self.DATABASE_URL.lower():
+                raise ValueError("SQLite databases are not permitted in production. Configure a PostgreSQL connection.")
+
+            # 4. Insecure wildcard CORS origins must not be permitted in production with credentials
+            if "*" in self.CORS_ORIGINS:
+                raise ValueError("Wildcard '*' CORS_ORIGINS is forbidden in production with credentials enabled.")
+
+        return self
 
 
 @lru_cache
